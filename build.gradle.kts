@@ -3,6 +3,7 @@ val cbHome: String by project
 plugins {
     `java-library`
     idea
+	eclipse
 }
 
 repositories {
