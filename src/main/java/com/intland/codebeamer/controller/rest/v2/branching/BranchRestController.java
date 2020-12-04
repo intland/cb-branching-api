@@ -1,5 +1,7 @@
 package com.intland.codebeamer.controller.rest.v2.branching;
 
+import static java.util.stream.Collectors.toList;
+import static java.util.stream.Collectors.toSet;
 import static org.apache.commons.lang3.StringUtils.isNotEmpty;
 
 import java.awt.Color;
@@ -14,7 +16,6 @@ import java.util.stream.Collectors;
 
 import javax.servlet.http.HttpServletRequest;
 
-import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -46,7 +47,6 @@ import com.intland.codebeamer.controller.support.branch.BranchSupport;
 import com.intland.codebeamer.controller.support.branch.CreateBranchParameterDto;
 import com.intland.codebeamer.controller.support.branch.CreateBranchParameters;
 import com.intland.codebeamer.controller.support.branch.jobs.BackgroundBranchCreator;
-import com.intland.codebeamer.manager.AccessRightsException;
 import com.intland.codebeamer.persistence.dao.BranchDao;
 import com.intland.codebeamer.persistence.dao.impl.EntityCache;
 import com.intland.codebeamer.persistence.dto.BranchDto;
@@ -55,7 +55,6 @@ import com.intland.codebeamer.persistence.dto.ProjectPermission;
 import com.intland.codebeamer.persistence.dto.TrackerDto;
 import com.intland.codebeamer.persistence.dto.TrackerLayoutLabelDto;
 import com.intland.codebeamer.persistence.dto.UserDto;
-import com.intland.codebeamer.persistence.dto.UserPermission;
 
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.Operation;
@@ -138,114 +137,134 @@ public class BranchRestController extends AbstractUserAwareRestController {
 				.collect(Collectors.toList());
 	}
 
-	private List<CreateBranchParameterDto> prepareParameters(final UserDto user, final CreateBranchesModel model)
-			throws ResourceNotFoundException, BadRequestException, ResourceForbiddenException {
-		final List<CreateBranchParameterDto> result = new ArrayList<>(model.getBranches().size());
+	private class BranchCreationContext {
+		private final CreateBranchModel branchModel;
+		private final TrackerDto tracker;
+		private final BranchDto branch;
+		private final UserDto user;
 
-		final Set<Integer> trackerIds = model.getBranches().stream()
-				.map(CreateBranchModel::getSource)
-				.map(IdentifiableModel::getId)
-				.collect(Collectors.toSet());
-
-		for (final CreateBranchModel branchModel : model.getBranches()) {
-			final TrackerDto tracker = this.trackerRestSupport.findTracker(branchModel.getSource().getId(), user);
+		public BranchCreationContext(CreateBranchModel branchModel, UserDto user) throws ResourceNotFoundException, BadRequestException, ResourceForbiddenException {
+			this.branchModel = branchModel;
+			this.user = user;
+			this.tracker = trackerRestSupport.findTracker(branchModel.getSource().getId(), user);
 			if (tracker.isA(BranchSupport.NON_BRANCHABLE_TYPES)) {
 				throw new BadRequestException("Branch creation is not supported for this type of tracker: " + tracker.getId());
 			}
-			checkBranchingPermission(user, tracker);
-			final BranchDto branchDto = this.createBranchDto(branchModel, tracker);
-			final Map<Integer, List<BranchDto>> incomingReferencesToRewriteWithNewBranches =
-					this.getIncomingReferencesToRewrite(user, trackerIds, tracker, branchDto);
-			final CreateBranchParameters params =
-					this.createCreateBranchParameters(branchModel, incomingReferencesToRewriteWithNewBranches);
-
-			result.add(this.createCreateBranchParameterDto(tracker, branchDto, params));
+			checkBranchingPermission();
+			branch = createBranchDto();
 		}
 
-		return result;
-	}
-
-
-	private void checkBranchingPermission(final UserDto user, final TrackerDto tracker) throws ResourceForbiddenException {
-		ProjectDto project = tracker.getProject();
-		boolean hasBranchAdminPermission = EntityCache.getInstance(user).isProjectAdmin(project.getId()) ||
-				EntityCache.getInstance(user).hasPermission(project, ProjectPermission.branch_admin);
-		if(!hasBranchAdminPermission) {
-			throw new ResourceForbiddenException(String.format("No permission to create branches in project %s.", project.getId()), CREATE_URI);
+		public CreateBranchParameterDto createCreateBranchParameterDto(Set<Integer> involvedTrackerIds, Map<TrackerDto,BranchCreationContext> branches) {
+			return createCreateBranchParameterDto(
+					createCreateBranchParameters(
+							getIncomingReferencesToRewrite(involvedTrackerIds, branches)));
 		}
-	}
 
-	private CreateBranchParameters createCreateBranchParameters(
-			final CreateBranchModel branchModel, final Map<Integer, List<BranchDto>> incomingReferencesToRewriteWithNewBranches) {
-		final BranchReferenceModel refModel = new BranchReferenceModel();
-		refModel.setReplaceIncomingReferences(true);
-		refModel.setIncomingReferencesToRewriteWithNewBranches(incomingReferencesToRewriteWithNewBranches);
+		private void checkBranchingPermission() throws ResourceForbiddenException {
+			ProjectDto project = tracker.getProject();
+			boolean hasBranchAdminPermission = EntityCache.getInstance(user).isProjectAdmin(project.getId()) ||
+					EntityCache.getInstance(user).hasPermission(project, ProjectPermission.branch_admin);
+			if(!hasBranchAdminPermission) {
+				throw new ResourceForbiddenException(String.format("No permission to create branches in project %s.", project.getId()), CREATE_URI);
+			}
+		}
 
-		final CreateBranchParameters params = new CreateBranchParameters();
-		params.setBaselineId(branchModel.getBaselineId());
-		params.setBranchReferenceModel(refModel);
-		params.setInheritance(branchModel.getPermissionInheritance());
-		return params;
-	}
+		private BranchDto createBranchDto() throws BadRequestException {
+			final BranchDto result = new BranchDto();
+			result.setName(branchModel.getName());
+			result.setKeyName(branchModel.getKeyName());
+			result.setColor(validate(branchModel.getColor()));
+			result.setDescription(branchModel.getDescription());
+			result.setProject(tracker.getProject());
+			result.setTrackerIdOfBranch(tracker.getId());
+			return result;
+		}
 
-	private CreateBranchParameterDto createCreateBranchParameterDto(
-			final TrackerDto tracker, final BranchDto branchDto, final CreateBranchParameters params) {
-		final CreateBranchParameterDto param = new CreateBranchParameterDto();
-		param.setSource(tracker);
-		param.setBranchParam(branchDto);
-		param.setParameters(params);
-		return param;
-	}
-
-	private Map<Integer, List<BranchDto>> getIncomingReferencesToRewrite(
-			final UserDto user,
-			final Set<Integer> involvedTrackerIds,
-			final TrackerDto tracker,
-			final BranchDto branchDto) {
-		final Map<Integer, List<BranchDto>> result = new HashMap<>();
-
-		final Multimap<TrackerDto, TrackerLayoutLabelDto> referringTrackers = this.branchSupport
-				.getIncomingReferenceFields(user, tracker, object -> {
-					// get only the referring trackers that are among the selected ones
-					final TrackerLayoutLabelDto field = (TrackerLayoutLabelDto) object;
-					return field != null && involvedTrackerIds.contains(field.getTrackerId());
-				});
-
-		// we need to rewrite all these references, so create the reference config accordingly
-		for (final Map.Entry<TrackerDto, Collection<TrackerLayoutLabelDto>> entry : referringTrackers.asMap().entrySet()) {
-			for (final TrackerLayoutLabelDto field : entry.getValue()) {
-				// put the new branch for each tracker in the list where the key is the field
-				if (!result.containsKey(field.getId())) {
-					result.put(field.getId(), new ArrayList<>());
+		private String validate(String color) throws BadRequestException {
+			if(isNotEmpty(color)) {
+				try {
+					Color.decode(color);
+				} catch (Exception e) {
+					throw new BadRequestException("Invalid color: " + e.toString());
 				}
-
-				result.get(field.getId()).add(branchDto);
 			}
+			return color;
 		}
 
-		return result;
-	}
+		private Map<Integer, List<BranchDto>> getIncomingReferencesToRewrite(Set<Integer> involvedTrackerIds, Map<TrackerDto,BranchCreationContext> branches) {
 
-	private BranchDto createBranchDto(final CreateBranchModel branch, final TrackerDto tracker) throws BadRequestException {
-		final BranchDto result = new BranchDto();
-		result.setName(branch.getName());
-		result.setKeyName(branch.getKeyName());
-		result.setColor(validate(branch.getColor()));
-		result.setDescription(branch.getDescription());
-		result.setProject(tracker.getProject());
-		return result;
-	}
+			Map<Integer, List<BranchDto>> result = new HashMap<>();
 
+			Multimap<TrackerDto, TrackerLayoutLabelDto> referringTrackers = branchSupport
+					.getIncomingReferenceFields(user, tracker, object -> {
+						// get only the referring trackers that are among the selected ones
+						final TrackerLayoutLabelDto field = (TrackerLayoutLabelDto) object;
+						return field != null && involvedTrackerIds.contains(field.getTrackerId());
+					});
 
-	private String validate(String color) throws BadRequestException {
-		if(isNotEmpty(color)) {
-			try {
-				Color.decode(color);
-			} catch (Exception e) {
-				throw new BadRequestException("Invalid color: " + e.toString());
+			// we need to rewrite all these references, so create the reference config accordingly
+			for (final Map.Entry<TrackerDto, Collection<TrackerLayoutLabelDto>> entry : referringTrackers.asMap().entrySet()) {
+				for (final TrackerLayoutLabelDto field : entry.getValue()) {
+					// put the new branch for each tracker in the list where the key is the field
+					if (!result.containsKey(field.getId())) {
+						result.put(field.getId(), new ArrayList<>());
+					}
+
+					result.get(field.getId()).add(branches.get(entry.getKey()).branch);
+				}
 			}
+
+			return result;
 		}
-		return color;
+
+		private CreateBranchParameters createCreateBranchParameters(
+				final Map<Integer, List<BranchDto>> incomingReferencesToRewriteWithNewBranches) {
+			final BranchReferenceModel refModel = new BranchReferenceModel();
+			refModel.setReplaceIncomingReferences(true);
+			refModel.setIncomingReferencesToRewriteWithNewBranches(incomingReferencesToRewriteWithNewBranches);
+
+			final CreateBranchParameters params = new CreateBranchParameters();
+			params.setBaselineId(branchModel.getBaselineId());
+			params.setBranchReferenceModel(refModel);
+			params.setInheritance(branchModel.getPermissionInheritance());
+			return params;
+		}
+
+		private CreateBranchParameterDto createCreateBranchParameterDto(final CreateBranchParameters params) {
+			final CreateBranchParameterDto param = new CreateBranchParameterDto();
+			param.setSource(tracker);
+			param.setBranchParam(branch);
+			param.setParameters(params);
+			return param;
+		}
+
 	}
+
+	private List<CreateBranchParameterDto> prepareParameters(final UserDto user, final CreateBranchesModel model)
+			throws ResourceNotFoundException, BadRequestException, ResourceForbiddenException {
+
+		Set<Integer> trackerIds = model.getBranches().stream()
+				.map(CreateBranchModel::getSource)
+				.map(IdentifiableModel::getId)
+				.collect(toSet());
+
+		Map<TrackerDto, BranchCreationContext> branches = prepareBranches(user, model);
+
+		return branches.values().stream()
+			.map(context -> context.createCreateBranchParameterDto(trackerIds, branches))
+			.collect(toList());
+	}
+
+
+	private Map<TrackerDto, BranchCreationContext> prepareBranches(final UserDto user, final CreateBranchesModel model)
+			throws ResourceNotFoundException, BadRequestException, ResourceForbiddenException {
+		Map<TrackerDto, BranchCreationContext> branches = new HashMap<>();
+		for (final CreateBranchModel branchModel : model.getBranches()) {
+			BranchCreationContext context = new BranchCreationContext(branchModel, user);
+			branches.put(context.tracker, context);
+		}
+		return branches;
+	}
+
 
 }
