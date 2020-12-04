@@ -12,7 +12,9 @@ import java.util.stream.Collectors;
 import javax.servlet.http.HttpServletRequest;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -45,6 +47,7 @@ import com.intland.codebeamer.persistence.dto.BranchDto;
 import com.intland.codebeamer.persistence.dto.TrackerDto;
 import com.intland.codebeamer.persistence.dto.TrackerLayoutLabelDto;
 import com.intland.codebeamer.persistence.dto.UserDto;
+import com.intland.codebeamer.persistence.dto.UserPermission;
 
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.Operation;
@@ -76,7 +79,7 @@ public class BranchRestController extends AbstractUserAwareRestController {
 
 	@Operation(summary = "Creates branches asynchronously", tags = "Branches")
 	@ApiResponses({
-			@ApiResponse(responseCode = "200", description = "Branch creation process has started"),
+			@ApiResponse(responseCode = "202", description = "Branch creation process has started"),
 			@ApiResponse(responseCode = "401", description = "Authorization required"),
 			@ApiResponse(responseCode = "403", description = "Access denied for one of the resources"),
 			@ApiResponse(responseCode = "404", description = "One of the resources is not found"),
@@ -88,7 +91,7 @@ public class BranchRestController extends AbstractUserAwareRestController {
 			produces = MediaType.APPLICATION_JSON_VALUE
 	)
 	@ResponseBody
-	public void asyncCreateBranches(@RequestBody final CreateBranchesModel model, final HttpServletRequest request)
+	public ResponseEntity<Void> asyncCreateBranches(@RequestBody final CreateBranchesModel model, final HttpServletRequest request)
 			throws ResourceUnauthorizedException, ResourceForbiddenException, ResourceNotFoundException {
 		final String uri = BranchRestController.CREATE_URI;
 		final UserDto user = this.checkUserHasPermission(uri);
@@ -101,6 +104,8 @@ public class BranchRestController extends AbstractUserAwareRestController {
 		}
 
 		this.branchCreator.createMultipleBranchesInBackground(request, user, params, false);
+
+		return ResponseEntity.status(HttpStatus.ACCEPTED).body(null);
 	}
 
 	@Operation(summary = "Fetches branches of a tracker", tags = "Branches")
