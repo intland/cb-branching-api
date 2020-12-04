@@ -1,6 +1,6 @@
 # codeBeamer Branching API Extension
 Does add endpoints to create and list branches to the Swagger API.
-Compatible with codeBeamer 10.1 and 20.11
+Verified to be compatible with with codeBeamer 10.1-SP6 and 20.11.
 
 ## Installation
 1. Copy cb-branching-api.jar found in releases to `<codeBeamer>/tomcat/webapps/cb/WEB-INF/lib`
