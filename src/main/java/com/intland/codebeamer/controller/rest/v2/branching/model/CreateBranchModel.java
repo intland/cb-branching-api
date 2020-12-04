@@ -12,19 +12,19 @@ import io.swagger.v3.oas.annotations.media.Schema;
 @Schema(name = "CreateBranch")
 public class CreateBranchModel {
 
-	@Schema(description = "Tracker to create branches from")
+	@Schema(description = "Tracker to create branches from", required = true)
 	private TrackerReferenceModel source;
 
-	@Schema(description = "Baseline of source")
+	@Schema(description = "Baseline of source", example = "1234")
 	private Integer baselineId;
 
-	@Schema(description = "Name of the new branch")
+	@Schema(description = "Name of the new branch", example = "1.2")
 	private String name;
 
-	@Schema(description = "Key name of the new branch")
+	@Schema(description = "Key name of the new branch", example = "PROD \u00BB 1.2")
 	private String keyName;
 
-	@Schema(description = "Color of the new branch")
+	@Schema(description = "Color of the new branch (#RRGGBB)", example = "#ffab46")
 	private String color;
 
 	@Schema(description = "Description of the new branch")

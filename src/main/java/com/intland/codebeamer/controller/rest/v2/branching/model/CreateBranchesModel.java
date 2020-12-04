@@ -11,7 +11,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 @Schema(name = "CreateBranches")
 public class CreateBranchesModel {
 
-	@Schema(description = "List of desired branches")
+
+	@Schema(description = "List of desired branches", required = true)
 	private List<CreateBranchModel> branches = new ArrayList<>(0);
 
 	public List<CreateBranchModel> getBranches() {
