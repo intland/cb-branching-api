@@ -48,7 +48,10 @@ import com.intland.codebeamer.controller.support.branch.CreateBranchParameters;
 import com.intland.codebeamer.controller.support.branch.jobs.BackgroundBranchCreator;
 import com.intland.codebeamer.manager.AccessRightsException;
 import com.intland.codebeamer.persistence.dao.BranchDao;
+import com.intland.codebeamer.persistence.dao.impl.EntityCache;
 import com.intland.codebeamer.persistence.dto.BranchDto;
+import com.intland.codebeamer.persistence.dto.ProjectDto;
+import com.intland.codebeamer.persistence.dto.ProjectPermission;
 import com.intland.codebeamer.persistence.dto.TrackerDto;
 import com.intland.codebeamer.persistence.dto.TrackerLayoutLabelDto;
 import com.intland.codebeamer.persistence.dto.UserDto;
@@ -136,7 +139,7 @@ public class BranchRestController extends AbstractUserAwareRestController {
 	}
 
 	private List<CreateBranchParameterDto> prepareParameters(final UserDto user, final CreateBranchesModel model)
-			throws ResourceNotFoundException, BadRequestException {
+			throws ResourceNotFoundException, BadRequestException, ResourceForbiddenException {
 		final List<CreateBranchParameterDto> result = new ArrayList<>(model.getBranches().size());
 
 		final Set<Integer> trackerIds = model.getBranches().stream()
@@ -149,6 +152,7 @@ public class BranchRestController extends AbstractUserAwareRestController {
 			if (tracker.isA(BranchSupport.NON_BRANCHABLE_TYPES)) {
 				throw new BadRequestException("Branch creation is not supported for this type of tracker: " + tracker.getId());
 			}
+			checkBranchingPermission(user, tracker);
 			final BranchDto branchDto = this.createBranchDto(branchModel, tracker);
 			final Map<Integer, List<BranchDto>> incomingReferencesToRewriteWithNewBranches =
 					this.getIncomingReferencesToRewrite(user, trackerIds, tracker, branchDto);
@@ -159,6 +163,16 @@ public class BranchRestController extends AbstractUserAwareRestController {
 		}
 
 		return result;
+	}
+
+
+	private void checkBranchingPermission(final UserDto user, final TrackerDto tracker) throws ResourceForbiddenException {
+		ProjectDto project = tracker.getProject();
+		boolean hasBranchAdminPermission = EntityCache.getInstance(user).isProjectAdmin(project.getId()) ||
+				EntityCache.getInstance(user).hasPermission(project, ProjectPermission.branch_admin);
+		if(!hasBranchAdminPermission) {
+			throw new ResourceForbiddenException(String.format("No permission to create branches in project %s.", project.getId()), CREATE_URI);
+		}
 	}
 
 	private CreateBranchParameters createCreateBranchParameters(
