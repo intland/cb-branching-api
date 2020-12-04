@@ -96,6 +96,10 @@ public class BranchRestController extends AbstractUserAwareRestController {
 		final String uri = BranchRestController.CREATE_URI;
 		final UserDto user = this.checkUserHasPermission(uri);
 
+		if(!branchSupport.hasBranchingLicense()) {
+			throw new ResourceForbiddenException("Missing branching license.", uri);
+		}
+
 		final List<CreateBranchParameterDto> params;
 		try {
 			params = this.prepareParameters(user, model);
