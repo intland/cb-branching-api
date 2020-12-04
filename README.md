@@ -1,4 +1,4 @@
-# codeBeamer BRanching API Extension
+# codeBeamer Branching API Extension
 Does add endpoints to create and list branches to the Swagger API.
 Compatible with codeBeamer 10.1 and 20.11
 
