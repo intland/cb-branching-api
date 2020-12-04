@@ -1,5 +1,8 @@
 package com.intland.codebeamer.controller.rest.v2.branching;
 
+import static org.apache.commons.lang3.StringUtils.isNotEmpty;
+
+import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -11,6 +14,7 @@ import java.util.stream.Collectors;
 
 import javax.servlet.http.HttpServletRequest;
 
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -30,6 +34,7 @@ import com.intland.codebeamer.controller.rest.v2.AbstractUserAwareRestController
 import com.intland.codebeamer.controller.rest.v2.branching.model.CreateBranchModel;
 import com.intland.codebeamer.controller.rest.v2.branching.model.CreateBranchesModel;
 import com.intland.codebeamer.controller.rest.v2.converter.reference.TrackerReferenceConverter;
+import com.intland.codebeamer.controller.rest.v2.exception.BadRequestException;
 import com.intland.codebeamer.controller.rest.v2.exception.ResourceForbiddenException;
 import com.intland.codebeamer.controller.rest.v2.exception.ResourceNotFoundException;
 import com.intland.codebeamer.controller.rest.v2.exception.ResourceUnauthorizedException;
@@ -92,7 +97,7 @@ public class BranchRestController extends AbstractUserAwareRestController {
 	)
 	@ResponseBody
 	public ResponseEntity<Void> asyncCreateBranches(@RequestBody final CreateBranchesModel model, final HttpServletRequest request)
-			throws ResourceUnauthorizedException, ResourceForbiddenException, ResourceNotFoundException {
+			throws ResourceUnauthorizedException, ResourceForbiddenException, ResourceNotFoundException, BadRequestException {
 		final String uri = BranchRestController.CREATE_URI;
 		final UserDto user = this.checkUserHasPermission(uri);
 
@@ -100,14 +105,7 @@ public class BranchRestController extends AbstractUserAwareRestController {
 			throw new ResourceForbiddenException("Missing branching license.", uri);
 		}
 
-		final List<CreateBranchParameterDto> params;
-		try {
-			params = this.prepareParameters(user, model);
-		} catch (final AccessRightsException e) {
-			throw new ResourceForbiddenException("Access denied: " + e.getMessage(), uri, e);
-		}
-
-		this.branchCreator.createMultipleBranchesInBackground(request, user, params, false);
+		this.branchCreator.createMultipleBranchesInBackground(request, user, this.prepareParameters(user, model), false);
 
 		return ResponseEntity.status(HttpStatus.ACCEPTED).body(null);
 	}
@@ -138,7 +136,7 @@ public class BranchRestController extends AbstractUserAwareRestController {
 	}
 
 	private List<CreateBranchParameterDto> prepareParameters(final UserDto user, final CreateBranchesModel model)
-			throws AccessRightsException, ResourceNotFoundException {
+			throws ResourceNotFoundException, BadRequestException {
 		final List<CreateBranchParameterDto> result = new ArrayList<>(model.getBranches().size());
 
 		final Set<Integer> trackerIds = model.getBranches().stream()
@@ -149,7 +147,7 @@ public class BranchRestController extends AbstractUserAwareRestController {
 		for (final CreateBranchModel branchModel : model.getBranches()) {
 			final TrackerDto tracker = this.trackerRestSupport.findTracker(branchModel.getSource().getId(), user);
 			if (tracker.isA(BranchSupport.NON_BRANCHABLE_TYPES)) {
-				throw new AccessRightsException("Branch creation is not allowed for this type of tracker: " + tracker.getId());
+				throw new BadRequestException("Branch creation is not supported for this type of tracker: " + tracker.getId());
 			}
 			final BranchDto branchDto = this.createBranchDto(branchModel, tracker);
 			final Map<Integer, List<BranchDto>> incomingReferencesToRewriteWithNewBranches =
@@ -214,14 +212,26 @@ public class BranchRestController extends AbstractUserAwareRestController {
 		return result;
 	}
 
-	private BranchDto createBranchDto(final CreateBranchModel branch, final TrackerDto tracker) {
+	private BranchDto createBranchDto(final CreateBranchModel branch, final TrackerDto tracker) throws BadRequestException {
 		final BranchDto result = new BranchDto();
 		result.setName(branch.getName());
 		result.setKeyName(branch.getKeyName());
-		result.setColor(branch.getColor());
+		result.setColor(validate(branch.getColor()));
 		result.setDescription(branch.getDescription());
 		result.setProject(tracker.getProject());
 		return result;
+	}
+
+
+	private String validate(String color) throws BadRequestException {
+		if(isNotEmpty(color)) {
+			try {
+				Color.decode(color);
+			} catch (Exception e) {
+				throw new BadRequestException("Invalid color: " + e.toString());
+			}
+		}
+		return color;
 	}
 
 }
